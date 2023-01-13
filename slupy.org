@@ -1,5 +1,4 @@
 * Słupy oświetleniowe
-
 ** Algorytm
 
 1.  Wczytanie ze zbioru drogi wszystkich obiektów według typów
@@ -45,3 +44,10 @@
 8. Następnie znajdowane będą miejsca gdzie odległość pomiędzy słupami będzie większa niż zakładana.
 
    9. Ustawienie brakujących słupów.
+
+
+** Wczytanie shapefile
+
+shp2pgsql -D -I -s 4326 Structure_Lines_1999.shp Structure_Lines_1999 | psql -U postgres
+
+shp2pgsql -D -I -s 4326 Roads.shp Roads | psql -U postgres
