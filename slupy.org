@@ -1,0 +1,47 @@
+* Słupy oświetleniowe
+
+** Algorytm
+
+1.  Wczytanie ze zbioru drogi wszystkich obiektów według typów
+
+   insert into result select descriptio, st_transform(geom, 2855) from roads;
+
+2. Wyciągnięcie lini oddalonych o 1m od dróg i skrzyżowań
+
+   insert into result2 select st_boundary(st_union(st_buffer(geom, 1))) from result where description = 'Road' or description = 'Intersection';
+
+3. Konwersja multilinestring na linestring
+
+   insert into result3 select (st_dump(geom)).geom  from result2;
+
+4. Ustawienie słupów wzdłuż wyznaczonych lini co określony dystans
+
+   insert into result4 select st_lineinterpolatepoints(geom, ${poleSpacing}/st_length(geom)) from result3 where st_length(geom) > ${poleSpacing};
+
+5. Rozwiązanie problemu ze skrzyżowaniami
+   a) wyznaczenie stref w których początkowo zostaną usunięte
+   
+   insert into result5 select 'clearPolesIntersections', st_union(st_buffer(geom, 20)) from result where description = 'Intersection';
+
+   b) wyznaczenie strefy wokół skrzyżowania gdzie zostaną umiejscowione słupy, pozwoli to mieć dobrze oświetlone samo skrzyżowanie
+   insert into result5 select 'placePolesIntersections', st_union(st_buffer(geom, 15)) from result where description = 'Intersection';
+
+   d) wyczyszczenie słupów z zewnętrznej strefy
+   delete from result4 where st_contains((select geom from result5 where type = 'clearPolesIntersections'), geom);
+
+   e) dodanie słupów na przecieciu lini z wewnętrzną strefą
+
+   insert into result4 select st_intersection((select st_boundary(geom) from result5 where type='placePolesIntersections'), (select geom from result2));
+
+6. Wyznaczenie miejsc w których nie można postawić słupów, pozostałe obiekty z roads takie jak wjazdy, parkingi, wyspy
+
+   insert into result5 select 'obstacle', st_buffer(st_union(geom), 3) from result where description != 'Road' and description != 'Intersection';
+
+   delete from result4 where st_contains((select geom from result5 where type = 'obstacles'), geom);
+
+7.  Podobne postępowanie zostanie zastosowane do zbioru structure_lines
+
+
+8. Następnie znajdowane będą miejsca gdzie odległość pomiędzy słupami będzie większa niż zakładana.
+
+   9. Ustawienie brakujących słupów.
