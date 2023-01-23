@@ -118,16 +118,45 @@ const clearObstacles = async () => {
     "create table if not exists clearedFromObstacles(geom geometry);"
   );
   await client.queryObject("truncate table clearedFromObstacles;");
+
   await client.queryObject(
     "create table if not exists obstacles(geom geometry);"
   );
   await client.queryObject("truncate table obstacles;");
+
+  await client.queryObject("create table if not exists toMove(geom geometry);");
+  await client.queryObject("truncate table toMove;");
+
   await client.queryObject(
     `insert into obstacles select st_buffer(st_union(geom), 3) from objects where description != 'Road' and description != 'Intersection';`
   );
 
   await client.queryObject(
     `insert into clearedFromObstacles select (st_dump(st_difference((select st_union(geom) from polesAfterIntersections), (select st_union(geom) from obstacles)))).geom;`
+  );
+
+  await client.queryObject(
+    `insert into toMove select (st_dump(st_intersection((select st_union(geom) from polesAfterIntersections), (select st_union(geom) from obstacles)))).geom;`
+  );
+};
+
+const movePolesAwayFromObstacles = async () => {
+  await client.queryObject(
+    "create table if not exists contoursWithoutObstacles(geom geometry);"
+  );
+  await client.queryObject("truncate table contoursWithoutObstacles;");
+
+  await client.queryObject(
+    "insert into contoursWithoutObstacles select st_difference((select st_union(geom) from roadscontours), (select st_union(geom) from obstacles));"
+  );
+
+  await client.queryObject(
+    "create table if not exists movedPoints(geom geometry);"
+  );
+  await client.queryObject("truncate table movedPoints;");
+
+  await client.queryObject(
+    "insert into movedPoints select st_closestPoint((select geom from result10), geom) from tomove;"
   );
 };
 
@@ -138,6 +167,7 @@ try {
   await findIntersections(15, 30);
   await clearAndPlaceInIntersections();
   await clearObstacles();
+  await movePolesAwayFromObstacles();
 } catch (e) {
   console.log(e);
 }
