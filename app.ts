@@ -9,66 +9,135 @@ const client = new Client({
 
 await client.connect();
 
+const loadObjects = async (takeSmallPart = true) => {
+  if (takeSmallPart) {
+    await client.queryObject("create table if not exists part(geom geometry);");
+
+    await client.queryObject("truncate table part;");
+
+    await client.queryObject(
+      "insert into part values(st_makeenvelope(4139149.4,165783.9,4140664.2,164921.7,2855));"
+    );
+
+    await client.queryObject(
+      "create table if not exists objects2(description varchar(50), geom geometry);"
+    );
+
+    await client.queryObject("truncate table objects2;");
+
+    await client.queryObject(
+      "insert into objects2 select descriptio, st_transform(geom, 2855) from roads;"
+    );
+
+    await client.queryObject(
+      "create table if not exists objects(description varchar(50), geom geometry);"
+    );
+
+    await client.queryObject("truncate table objects;");
+
+    await client.queryObject(
+      "insert into objects select description, geom from objects2 where st_intersects(geom, (select geom from part));"
+    );
+  } else {
+    await client.queryObject(
+      "create table if not exists objects(description varchar(50), geom geometry);"
+    );
+
+    await client.queryObject("truncate table objects;");
+
+    await client.queryObject(
+      "insert into objects select descriptio, st_transform(geom, 2855) from roads;"
+    );
+  }
+};
+
+const createRoadsContours = async (distanceFromRoad: number) => {
+  await client.queryObject(
+    "create table if not exists roadsContours(geom geometry);"
+  );
+
+  await client.queryObject("truncate table roadsContours;");
+
+  await client.queryObject(
+    `insert into roadsContours select
+(st_dump(st_boundary(st_union(st_buffer(geom, ${distanceFromRoad}))))).geom
+from objects
+where description = 'Road' or description = 'Intersection';`
+  );
+};
+
+const placePoles = async (poleSpacing: number) => {
+  await client.queryObject(
+    "create table if not exists initialPolesPlacement(geom geometry);"
+  );
+
+  await client.queryObject("truncate table initialPolesPlacement;");
+
+  await client.queryObject(
+    `insert into initialPolesPlacement select st_lineinterpolatepoints(geom, ${poleSpacing}/st_length(geom)) from roadsContours where st_length(geom) > ${poleSpacing};`
+  );
+};
+
+const findIntersections = async (
+  placeZoneSize: number,
+  clearZoneSize: number
+) => {
+  await client.queryObject(
+    "create table if not exists intersections(type varchar(50), geom geometry);"
+  );
+
+  await client.queryObject("truncate table intersections;");
+
+  await client.queryObject(
+    `insert into intersections select 'clearZone', st_union(st_buffer(geom, ${clearZoneSize})) from objects where description = 'Intersection';`
+  );
+
+  await client.queryObject(
+    `insert into intersections select 'placeZone', st_union(st_buffer(geom, ${placeZoneSize})) from objects where description = 'Intersection';`
+  );
+};
+
+const clearAndPlaceInIntersections = async () => {
+  await client.queryObject(
+    "create table if not exists polesAfterIntersections(geom geometry);"
+  );
+
+  await client.queryObject("truncate table polesAfterIntersections;");
+
+  await client.queryObject(
+    `insert into polesAfterIntersections select (st_dump(st_difference((select st_union(geom) from initialpolesplacement), (select st_union(geom) from intersections where type = 'clearZone')))).geom;`
+  );
+
+  await client.queryObject(
+    `insert into polesAfterIntersections select st_intersection((select st_boundary(st_union(geom)) from intersections where type = 'placeZone'), (select st_union(geom) from roadsContours));`
+  );
+};
+
+const clearObstacles = async () => {
+  await client.queryObject(
+    "create table if not exists clearedFromObstacles(geom geometry);"
+  );
+  await client.queryObject("truncate table clearedFromObstacles;");
+  await client.queryObject(
+    "create table if not exists obstacles(geom geometry);"
+  );
+  await client.queryObject("truncate table obstacles;");
+  await client.queryObject(
+    `insert into obstacles select st_buffer(st_union(geom), 3) from objects where description != 'Road' and description != 'Intersection';`
+  );
+
+  await client.queryObject(
+    `insert into clearedFromObstacles select (st_dump(st_difference((select st_union(geom) from polesAfterIntersections), (select st_union(geom) from obstacles)))).geom;`
+  );
+};
+
 try {
-  // await client.queryObject("DROP TABLE result, result2, result3, result4;");
-  await client.queryObject(
-    "truncate table result, result2, result3, result4, result5;"
-  );
-  // await client.queryObject(
-  //   "create table result(description varchar(50), geom geometry);"
-  // );
-
-  // await client.queryObject("create table result2(geom geometry);");
-
-  // await client.queryObject("create table result3(geom geometry);");
-
-  // await client.queryObject("create table result4(geom geometry);");
-
-  // await client.queryObject(
-  //   "create table result5(type varchar(50), geom geometry);"
-  // );
-
-  await client.queryObject(
-    "insert into result select descriptio, st_transform(geom, 2855) from roads;"
-  );
-
-  await client.queryObject(
-    "insert into result2 select st_boundary(st_union(st_buffer(geom, 1))) from result where description = 'Road' or description = 'Intersection';"
-  );
-
-  await client.queryObject(
-    "insert into result3 select (st_dump(geom)).geom  from result2;"
-  );
-
-  const poleSpacing = 50;
-
-  await client.queryObject(
-    `insert into result4 select st_lineinterpolatepoints(geom, ${poleSpacing}/st_length(geom)) from result3 where st_length(geom) > ${poleSpacing};`
-  );
-
-  await client.queryObject(
-    `insert into result5 select 'clearPolesIntersections', st_union(st_buffer(geom, 20)) from result where description = 'Intersection';`
-  );
-
-  await client.queryObject(
-    `insert into result5 select 'placePolesIntersections', st_union(st_buffer(geom, 15)) from result where description = 'Intersection';`
-  );
-
-  await client.queryObject(
-    `insert into result5 select 'obstacle', st_buffer(st_union(geom), 3) from result where description != 'Road' and description != 'Intersection';`
-  );
-
-  await client.queryObject(
-    `delete from result4 where st_contains((select geom from result5 where type = 'clearPolesIntersections'), geom);`
-  );
-
-  await client.queryObject(
-    `delete from result4 where st_contains((select geom from result5 where type = 'obstacles'), geom);`
-  );
-
-  /* await client.queryObject(
-    `insert into result4 select st_intersection((select st_boundary(geom) from result5 where type='placePolesIntersections'), (select geom from result2));`
-  ); */
+  await loadObjects();
+  await createRoadsContours(1);
+  await placePoles(30);
+  await findIntersections(15, 30);
+  await clearAndPlaceInIntersections();
+  await clearObstacles();
 } catch (e) {
   console.log(e);
 }
