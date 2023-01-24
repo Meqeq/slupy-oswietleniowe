@@ -1,53 +1,169 @@
 * Słupy oświetleniowe
+
+** Cel projektu
+Projekt ma za zadanie rozmieścić na mapie miasta słupy oświetleniowe co określoną odległość w pasie drogowym. Słupy nie mogą stać w tym samym miejscu co elementy infrastruktury miasta tj. bramy wjazdowe, chodniki.
+
+** Dane wejściowe
+
+Jako zbiór danych używamy mapy drogowej oraz infrastruktury miasta Washington DC. Dane pochodzą z serwisu [...tutaj link]. Wykorzystaliśmy dane dostępne w zbiorach Roads i Structure_Lines. Zbiory pobraliśmy w formacie shp, pozwoli to na łatwe załadowanie ich do bazy danych.
+
+** Wykorzystane technologie
+
+Do przechowywania danych i ich przetwarzania wykorzystujemy PostgreSQL wraz z rozszerzeniem PostGIS. Do skryptu wyznaczającego położenie słupów wykorzystujemy Deno.
+
+** Podział prac 
+
+Tomasz Kolbusz wymyślił wstępny algorytm, który w późniejszym etapie okazał się niewystarczający.
+
+Dawid Jarosz ulepszył algorytm, który został wspólnie zaimplementowany.
+
+** Uruchomienie aplikacji 
+
+*** Załadowanie danych 
+
+Do załadowania danych z plików shp używamy programu shp2sql. Flaga -D zmienia format wyjściowy z programu na postgres'owy dump, przyspiesza to ładowanie danych. Flaga -I dokłada indeksy GiST na kolumny z geometrią.
+
+#+BEGIN_SRC sh
+  shp2sql -D -I -s 4326 Structure_Lines_1999.shp Structure_Lines | psql 
+
+  shp2sql -D -I -s 4326 Roads_2019.shp Roads | psql 
+#+END_SRC
+
+*** Uruchomienie skryptu
+
+Skrypt jest uruchamiany w deno, czyli środowisku uruchomieniowym typescript. Jedną z cech deno jest brak konieczności instalacji zależności. Zostaną one automatycznie pobrane przy starcie skryptu. Sam skrypt pozwala nam wywołać kolejne polecenia SQL za pomocą których wyznaczamy położenie słupów oświetleniowych.
+
+#+BEGIN_SRC sh
+    deno run --allow-net app.ts 
+#+END_SRC
+
 ** Algorytm
 
-1.  Wczytanie ze zbioru drogi wszystkich obiektów według typów
+1. Wczytanie danych do bazy oraz utworzenie potrzebnych tabel.
+2. Wczytanie ze zbioru Roads wszystkich obiektów według typów.
 
-   insert into result select descriptio, st_transform(geom, 2855) from roads;
+#+BEGIN_SRC sql
+    insert into objects2 select descriptio, st_transform(geom, 2855) from roads;
+#+END_SRC
 
-2. Wyciągnięcie lini oddalonych o 1m od dróg i skrzyżowań
+3. Wyciągnięcie konturów dróg 
 
-   insert into result2 select st_boundary(st_union(st_buffer(geom, 1))) from result where description = 'Road' or description = 'Intersection';
+Wykorzystując st_boundary i st_buffer możemy wytyczyć obrys drogi w zadanej odległości.
 
-3. Konwersja multilinestring na linestring
+#+BEGIN_SRC sql
+    insert into roadsContours
+    select
+        (st_dump(st_boundary(st_union(st_buffer(geom, ${distanceFromRoad}))))).geom
+    from objects
+    where description = 'Road' or description = 'Intersection';
+#+END_SRC
 
-   insert into result3 select (st_dump(geom)).geom  from result2;
+4. Ustawienie słupów wzdłuż dorgi co określony dystans 
 
-4. Ustawienie słupów wzdłuż wyznaczonych lini co określony dystans
+Do wyznaczenia początkowego położenia słupów wykorzystujemy funkcje st_lineinterpolatepoints, która pozwala wyznaczyć punkty na lini co zadany dystans. 
 
-   insert into result4 select st_lineinterpolatepoints(geom, ${poleSpacing}/st_length(geom)) from result3 where st_length(geom) > ${poleSpacing};
+#+BEGIN_SRC sql
+    insert into initialPolesPlacement 
+    select st_lineinterpolatepoints(geom, ${poleSpacing}/st_length(geom)) 
+    from roadsContours 
+    where st_length(geom) > ${poleSpacing};
+#+END_SRC
 
-5. Rozwiązanie problemu ze skrzyżowaniami
-   a) wyznaczenie stref w których początkowo zostaną usunięte
-   
-   insert into result5 select 'clearPolesIntersections', st_union(st_buffer(geom, 20)) from result where description = 'Intersection';
+5. Rozwiązanie problemu skrzyżowań
 
-   b) wyznaczenie strefy wokół skrzyżowania gdzie zostaną umiejscowione słupy, pozwoli to mieć dobrze oświetlone samo skrzyżowanie
-   insert into result5 select 'placePolesIntersections', st_union(st_buffer(geom, 15)) from result where description = 'Intersection';
+W przypadku skrzyżowań, nie chcieliśmy żeby nasz algorytm ustawił słupy w bliskiej odległości od skrzyżowania, a jednocześnie żeby w pewnej zadanej odległości ustawić słupy, które mogłyby doświetlać przejścia dla pieszych. 
 
-   d) wyczyszczenie słupów z zewnętrznej strefy
-   delete from result4 where st_contains((select geom from result5 where type = 'clearPolesIntersections'), geom);
+a. Wyznaczenie dwóch stref wokoło skrzyżowania 
 
-   e) dodanie słupów na przecieciu lini z wewnętrzną strefą
+W tym punkcie wyznaczamy dwie strefy - większą z której usuniemy postawione słupy, drugą mniejszą, której przeciecie krawędzi z liniami według których wyznaczaliśmy pierwotne położenie słupów. Pozwoli to nam ustawić słupy w zadanej odległości od skrzyżowania (można wykorzystać jako oświetlenie przejść), a uniknąć sytuacji w której postawione słupy będą znajdować się bardzo blisko już postawionych słupów.
 
-   insert into result4 select st_intersection((select st_boundary(geom) from result5 where type='placePolesIntersections'), (select geom from result2));
+#+BEGIN_SRC sql
+    insert into intersections 
+    select 'clearZone', st_union(st_buffer(geom, ${clearZoneSize})) 
+    from objects 
+    where description = 'Intersection';
 
-6. Wyznaczenie miejsc w których nie można postawić słupów, pozostałe obiekty z roads takie jak wjazdy, parkingi, wyspy
+    insert into intersections 
+    select 'placeZone', st_union(st_buffer(geom, ${placeZoneSize})) 
+    from objects 
+    where description = 'Intersection';
+#+END_SRC
 
-   insert into result5 select 'obstacle', st_buffer(st_union(geom), 3) from result where description != 'Road' and description != 'Intersection';
+b. Usunięcie słupów z większej strefy
 
-   delete from result4 where st_contains((select geom from result5 where type = 'obstacles'), geom);
+#+BEGIN_SRC sql
+    insert into polesAfterIntersections 
+    select (st_dump(st_difference(
+        (select st_union(geom) from initialpolesplacement), 
+        (select st_union(geom) from intersections where type = 'clearZone')))
+    ).geom;
+#+END_SRC
 
-7.  Podobne postępowanie zostanie zastosowane do zbioru structure_lines
+c. Dodanie słupów na przecięciach 
+
+#+BEGIN_SRC sql
+    insert into polesAfterIntersections 
+    select st_intersection(
+        (select st_boundary(st_union(geom)) from intersections where type = 'placeZone'), 
+        (select st_union(geom) from roadsContours)
+    );
+#+END_SRC
+
+6. Znalezienie przeszkód które uniemożliwiają postawienie słupów. 
+
+Tutaj jako przeszkody zakwalifikowaliśmy pozostałe obiekty ze zbioru Roads, takie jak alejki, parkingi, podjazdy oraz zbiór Structure_Lines.
+
+#+BEGIN_SRC sql
+    insert into obstacles 
+    select st_buffer(st_union(geom), 3) 
+    from objects 
+    where description != 'Road' and description != 'Intersection';
+#+END_SRC
+
+7. Usunięcie słupów które kolidują z przeszkodami.
+
+#+BEGIN_SRC sql
+    insert into clearedFromObstacles 
+    select (st_dump(st_difference(
+        (select st_union(geom) from polesAfterIntersections),
+        (select st_union(geom) from obstacles)))
+    ).geom;
+#+END_SRC
+
+8. Rozwiązanie problemu z brakującymi słupami po usunięciu kolidujących.
+
+Po usunięciu kolidujących słupów odległości między niektórymi słupami mogą być znacznie większe niż założone, dlatego postanowiliśmy usunięte punkty przesunąć na pozycję na której nie będą kolidowały z innymi obiektami. 
+
+a. Wybranie uniętych punktów.
+
+#+BEGIN_SRC sql
+    insert into toMove 
+    select (st_dump(st_intersection(
+        (select st_union(geom) from polesAfterIntersections), 
+        (select st_union(geom) from obstacles)))
+    ).geom;
+#+END_SRC
+
+b. Znalezienie lini według których były ustawiane słupy, ale wycięcie części które kolidują z obiektami
+
+#+BEGIN_SRC sql
+    insert into contoursWithoutObstacles 
+    select st_difference(
+        (select st_union(geom) from roadscontours), 
+        (select st_union(geom) from obstacles)
+    );
+#+END_SRC
+
+c. Znalezienie najbliższych punktów, które nie kolidują z przeszkodami. 
+
+W tym miejscu dla każdego usuniętego punktu szukamy najbliższego możliwego położenia dla punktu. Efektywnie to przesuwa punkt na lini która przechodzi przez tą przeszkodę, stawiając go po najbliższej stronie przeszkody.
+
+#+BEGIN_SRC sql
+    insert into movedPoints 
+    select st_closestPoint((select geom from contoursWithoutObstacles), geom) 
+    from tomove;
+#+END_SRC
+
+9. [TODO] Znalezienie punktów które postawione są za blisko siebie i usunięcie ich.
 
 
-8. Następnie znajdowane będą miejsca gdzie odległość pomiędzy słupami będzie większa niż zakładana.
-
-   9. Ustawienie brakujących słupów.
-
-
-** Wczytanie shapefile
-
-shp2pgsql -D -I -s 4326 Structure_Lines_1999.shp Structure_Lines_1999 | psql -U postgres
-
-shp2pgsql -D -I -s 4326 Roads.shp Roads | psql -U postgres
