@@ -6,7 +6,7 @@
 	"desc": "run my app.ts file"
     },
     "dev": {
-	"cmd": "deno run --allow-net --allow-read --allow-write --allow-env -c tsconfig.json app.ts"
+	"cmd": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run -c tsconfig.json app.ts"
     },
     "test": {
 	"cmd": "deno test --allow-net --allow-read --allow-write --allow-env -c tsconfig.json"
