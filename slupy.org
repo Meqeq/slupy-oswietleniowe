@@ -1,3 +1,8 @@
+#+TITLE: Słupy oświetleniowe
+#+AUTHOR: Dawid Jarosz, Tomasz Kolbusz
+
+#+LATEX_HEADER: \makeatletter \@ifpackageloaded{geometry}{\geometry{ a4paper, total={170mm,257mm}, left=15mm, top=15mm }}{\usepackage[margin=1.5cm]{geometry}} \makeatother
+
 * Słupy oświetleniowe
 
 ** Cel projektu
@@ -46,6 +51,8 @@ Skrypt jest uruchamiany w deno, czyli środowisku uruchomieniowym typescript. Je
     insert into objects2 select descriptio, st_transform(geom, 2855) from roads;
 #+END_SRC
 
+[[./img/1.png]]
+
 3. Wyciągnięcie konturów dróg 
 
 Wykorzystując st_boundary i st_buffer możemy wytyczyć obrys drogi w zadanej odległości.
@@ -58,6 +65,10 @@ Wykorzystując st_boundary i st_buffer możemy wytyczyć obrys drogi w zadanej o
     where description = 'Road' or description = 'Intersection';
 #+END_SRC
 
+[[./img/2.png]]
+
+
+
 4. Ustawienie słupów wzdłuż dorgi co określony dystans 
 
 Do wyznaczenia początkowego położenia słupów wykorzystujemy funkcje st_lineinterpolatepoints, która pozwala wyznaczyć punkty na lini co zadany dystans. 
@@ -68,6 +79,8 @@ Do wyznaczenia początkowego położenia słupów wykorzystujemy funkcje st_line
     from roadsContours 
     where st_length(geom) > ${poleSpacing};
 #+END_SRC
+
+[[./img/3.png]]
 
 5. Rozwiązanie problemu skrzyżowań
 
@@ -89,6 +102,8 @@ W tym punkcie wyznaczamy dwie strefy - większą z której usuniemy postawione s
     where description = 'Intersection';
 #+END_SRC
 
+[[./img/4.png]]
+
 b. Usunięcie słupów z większej strefy
 
 #+BEGIN_SRC sql
@@ -109,6 +124,8 @@ c. Dodanie słupów na przecięciach
     );
 #+END_SRC
 
+[[./img/5.png]]
+
 6. Znalezienie przeszkód które uniemożliwiają postawienie słupów. 
 
 Tutaj jako przeszkody zakwalifikowaliśmy pozostałe obiekty ze zbioru Roads, takie jak alejki, parkingi, podjazdy oraz zbiór Structure_Lines.
@@ -119,6 +136,8 @@ Tutaj jako przeszkody zakwalifikowaliśmy pozostałe obiekty ze zbioru Roads, ta
     from objects 
     where description != 'Road' and description != 'Intersection';
 #+END_SRC
+
+[[./img/6.png]]
 
 7. Usunięcie słupów które kolidują z przeszkodami.
 
@@ -159,11 +178,24 @@ c. Znalezienie najbliższych punktów, które nie kolidują z przeszkodami.
 W tym miejscu dla każdego usuniętego punktu szukamy najbliższego możliwego położenia dla punktu. Efektywnie to przesuwa punkt na lini która przechodzi przez tą przeszkodę, stawiając go po najbliższej stronie przeszkody.
 
 #+BEGIN_SRC sql
-    insert into movedPoints 
-    select st_closestPoint((select geom from contoursWithoutObstacles), geom) 
-    from tomove;
+      insert into movedPoints 
+      select st_closestPoint((select geom from contoursWithoutObstacles), geom) 
+      from tomove;
 #+END_SRC
 
-9. [TODO] Znalezienie punktów które postawione są za blisko siebie i usunięcie ich.
+[[./img/7.png]]
+
+Szare punkty zostały przesunięte do pozycji niebieskich punktów.
+
+9. Znalezienie punktów które postawione są za blisko siebie i usunięcie ich.
+
+  #+BEGIN_SRC sql
+            insert into finalPoles select ST_RemoveRepeatedPoints(st_collect(geom), ${minLength}) from clearedFromObstacles;
+  #+END_SRC
+
+[[./img/8.png]]
+
+[[./img/9.png]]
+
 
 

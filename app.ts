@@ -9,16 +9,6 @@ const client = new Client({
 
 await client.connect();
 
-/* const loadShapefiles = async () => {
-  const p = Deno.run({
-    cmd: ["shp2pgsql", "-D", "-I", "-s 4326", "Roads.shp Roads | psql"],
-  });
-  const { code } = await p.status(); // (*1); wait here for child to finish
-  p.close();
-  //{ rid: 3, pid: 30393 }await p.status();
-  //{ success: true, code: 0 }//Output: abcd
-}; */
-
 const loadObjects = async (takeSmallPart = true) => {
   if (takeSmallPart) {
     await client.queryObject("create table if not exists part(geom geometry);");
@@ -170,9 +160,18 @@ const movePolesAwayFromObstacles = async () => {
   );
 };
 
-try {
-  // await loadShapefiles();
+const removeClosePoints = async (minLength: number) => {
+  await client.queryObject(
+    "create table if not exists finalPoles(geom geometry);"
+  );
+  await client.queryObject("truncate table finalPoles;");
 
+  await client.queryObject(
+    `insert into finalPoles select ST_RemoveRepeatedPoints(st_collect(geom), ${minLength}) from clearedFromObstacles;`
+  );
+};
+
+try {
   await loadObjects();
   await createRoadsContours(1);
   await placePoles(30);
@@ -180,6 +179,7 @@ try {
   await clearAndPlaceInIntersections();
   await clearObstacles();
   await movePolesAwayFromObstacles();
+  await removeClosePoints(10);
 } catch (e) {
   console.log(e);
 }
