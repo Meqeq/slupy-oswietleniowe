@@ -11,13 +11,8 @@ await client.connect();
 
 const loadObjects = async (takeSmallPart = true) => {
   if (takeSmallPart) {
-    await client.queryObject("create table if not exists part(geom geometry);");
-
-    await client.queryObject("truncate table part;");
-
-    await client.queryObject(
-      "insert into part values(st_makeenvelope(4139149.4,165783.9,4140664.2,164921.7,2855));"
-    );
+    const envelope =
+      "st_makeenvelope(4139149.4,165783.9,4140664.2,164921.7,2855)";
 
     await client.queryObject(
       "create table if not exists objects2(description varchar(50), geom geometry);"
@@ -36,7 +31,27 @@ const loadObjects = async (takeSmallPart = true) => {
     await client.queryObject("truncate table objects;");
 
     await client.queryObject(
-      "insert into objects select description, geom from objects2 where st_intersects(geom, (select geom from part));"
+      `insert into objects select description, geom from objects2 where st_intersects(geom, ${envelope});`
+    );
+
+    await client.queryObject(
+      "create table if not exists structures2(geom geometry);"
+    );
+
+    await client.queryObject("truncate table structures2;");
+
+    await client.queryObject(
+      `insert into structures2 select st_transform(geom, 2855) from structure_lines;`
+    );
+
+    await client.queryObject(
+      "create table if not exists structures(geom geometry);"
+    );
+
+    await client.queryObject("truncate table structures;");
+
+    await client.queryObject(
+      `insert into structures select geom from structures2 where st_intersects(geom, ${envelope});`
     );
   } else {
     await client.queryObject(
@@ -113,7 +128,10 @@ const clearAndPlaceInIntersections = async () => {
   );
 };
 
-const clearObstacles = async () => {
+const clearObstacles = async (
+  spacingForStructureLines: number,
+  spacingForOther: number
+) => {
   await client.queryObject(
     "create table if not exists clearedFromObstacles(geom geometry);"
   );
@@ -128,7 +146,11 @@ const clearObstacles = async () => {
   await client.queryObject("truncate table toMove;");
 
   await client.queryObject(
-    `insert into obstacles select st_buffer(st_union(geom), 3) from objects where description != 'Road' and description != 'Intersection';`
+    `insert into obstacles select st_buffer(st_union(geom), ${spacingForOther}) from objects where description != 'Road' and description != 'Intersection';`
+  );
+
+  await client.queryObject(
+    `insert into obstacles select st_buffer(st_union(geom), ${spacingForStructureLines}) from structures;`
   );
 
   await client.queryObject(
@@ -177,7 +199,7 @@ try {
   await placePoles(30);
   await findIntersections(15, 30);
   await clearAndPlaceInIntersections();
-  await clearObstacles();
+  await clearObstacles(1, 3);
   await movePolesAwayFromObstacles();
   await removeClosePoints(10);
 } catch (e) {

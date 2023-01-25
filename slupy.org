@@ -45,13 +45,17 @@ Skrypt jest uruchamiany w deno, czyli środowisku uruchomieniowym typescript. Je
 ** Algorytm
 
 1. Wczytanie danych do bazy oraz utworzenie potrzebnych tabel.
-2. Wczytanie ze zbioru Roads wszystkich obiektów według typów.
+2. Wczytanie ze zbioru Roads wszystkich obiektów według typów, wczytanie danych ze zbioru structure_lines
 
 #+BEGIN_SRC sql
-    insert into objects2 select descriptio, st_transform(geom, 2855) from roads;
+          insert into objects2 select descriptio, st_transform(geom, 2855) from roads;
+
+          insert into structures2 select st_transform(geom, 2855) from structure_lines;
 #+END_SRC
 
 [[./img/1.png]]
+
+[[./img/10.png]]
 
 3. Wyciągnięcie konturów dróg 
 
@@ -185,7 +189,7 @@ W tym miejscu dla każdego usuniętego punktu szukamy najbliższego możliwego p
 
 [[./img/7.png]]
 
-Szare punkty zostały przesunięte do pozycji niebieskich punktów.
+Fioletowe punkty zostały przesunięte do pozycji niebieskich punktów.
 
 9. Znalezienie punktów które postawione są za blisko siebie i usunięcie ich.
 
