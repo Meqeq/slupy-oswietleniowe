@@ -1,4 +1,4 @@
-% Created 2023-01-25 śro 01:42
+% Created 2023-01-25 śro 10:48
 % Intended LaTeX compiler: pdflatex
 \documentclass[11pt]{article}
 \usepackage[utf8]{inputenc}
@@ -30,34 +30,34 @@
 
 
 \section{Słupy oświetleniowe}
-\label{sec:orgee6b79e}
+\label{sec:org0fc4196}
 
 \subsection{Cel projektu}
-\label{sec:org1f6cad9}
+\label{sec:org96f53b2}
 Projekt ma za zadanie rozmieścić na mapie miasta słupy oświetleniowe co określoną odległość w pasie drogowym. Słupy nie mogą stać w tym samym miejscu co elementy infrastruktury miasta tj. bramy wjazdowe, chodniki.
 
 \subsection{Dane wejściowe}
-\label{sec:org153bbda}
+\label{sec:org076853f}
 
 Jako zbiór danych używamy mapy drogowej oraz infrastruktury miasta Washington DC. Dane pochodzą z serwisu [\ldots{}tutaj link]. Wykorzystaliśmy dane dostępne w zbiorach Roads i Structure\textsubscript{Lines}. Zbiory pobraliśmy w formacie shp, pozwoli to na łatwe załadowanie ich do bazy danych.
 
 \subsection{Wykorzystane technologie}
-\label{sec:org72fceea}
+\label{sec:orge1bc8dc}
 
 Do przechowywania danych i ich przetwarzania wykorzystujemy PostgreSQL wraz z rozszerzeniem PostGIS. Do skryptu wyznaczającego położenie słupów wykorzystujemy Deno.
 
 \subsection{Podział prac}
-\label{sec:org0b931df}
+\label{sec:orgd23b649}
 
 Tomasz Kolbusz wymyślił wstępny algorytm, który w późniejszym etapie okazał się niewystarczający.
 
 Dawid Jarosz ulepszył algorytm, który został wspólnie zaimplementowany.
 
 \subsection{Uruchomienie aplikacji}
-\label{sec:orgbc75384}
+\label{sec:org00b981a}
 
 \subsubsection{Załadowanie danych}
-\label{sec:org83c46a9}
+\label{sec:org1a3c12c}
 
 Do załadowania danych z plików shp używamy programu shp2sql. Flaga -D zmienia format wyjściowy z programu na postgres'owy dump, przyspiesza to ładowanie danych. Flaga -I dokłada indeksy GiST na kolumny z geometrią.
 
@@ -68,7 +68,7 @@ shp2pgsql -D -I -s 4326 Roads.shp Roads | psql
 \end{verbatim}
 
 \subsubsection{Uruchomienie skryptu}
-\label{sec:orgec4543b}
+\label{sec:org3893847}
 
 Skrypt jest uruchamiany w deno, czyli środowisku uruchomieniowym typescript. Jedną z cech deno jest brak konieczności instalacji zależności. Zostaną one automatycznie pobrane przy starcie skryptu. Sam skrypt pozwala nam wywołać kolejne polecenia SQL za pomocą których wyznaczamy położenie słupów oświetleniowych.
 
@@ -77,19 +77,25 @@ deno run --allow-net app.ts
 \end{verbatim}
 
 \subsection{Algorytm}
-\label{sec:orgb4fed20}
+\label{sec:orge206f0d}
 
 \begin{enumerate}
 \item Wczytanie danych do bazy oraz utworzenie potrzebnych tabel.
-\item Wczytanie ze zbioru Roads wszystkich obiektów według typów.
+\item Wczytanie ze zbioru Roads wszystkich obiektów według typów, wczytanie danych ze zbioru structure\textsubscript{lines}
 \end{enumerate}
 
 \begin{verbatim}
 insert into objects2 select descriptio, st_transform(geom, 2855) from roads;
+
+insert into structures2 select st_transform(geom, 2855) from structure_lines;
 \end{verbatim}
 
 \begin{center}
 \includegraphics[width=.9\linewidth]{./img/1.png}
+\end{center}
+
+\begin{center}
+\includegraphics[width=.9\linewidth]{./img/10.png}
 \end{center}
 
 \begin{enumerate}
@@ -248,7 +254,7 @@ from tomove;
 \includegraphics[width=.9\linewidth]{./img/7.png}
 \end{center}
 
-Szare punkty zostały przesunięte do pozycji niebieskich punktów.
+Fioletowe punkty zostały przesunięte do pozycji niebieskich punktów.
 
 \begin{enumerate}
 \item Znalezienie punktów które postawione są za blisko siebie i usunięcie ich.
